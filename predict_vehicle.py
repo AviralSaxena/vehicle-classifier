@@ -1,32 +1,56 @@
-from fastai.vision.all import load_learner, PILImage
-from pathlib import Path
-import requests
+import argparse
 from io import BytesIO
+from pathlib import Path
 
-# Load the models
-learn_resnet32 = load_learner(Path('simple_cnn_fastai_resnet32.pkl'))
-learn_resnet50 = load_learner(Path('simple_cnn_fastai_resnet50.pkl'))
-learn_resnet101 = load_learner(Path('simple_cnn_fastai_resnet101.pkl'))
+import requests
+from fastai.vision.all import PILImage, load_learner
 
-# Hardcoded path
-# image = 'test/Bentley Arnage Sedan 2009/003222.jpg'
 
-# Download image from URL
-image_url = input("Please enter an image URL for prediction: ")
-response = requests.get(image_url)
-image = PILImage.create(BytesIO(response.content))
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run predictions against one or more exported FastAI models."
+    )
+    parser.add_argument(
+        "--image-url",
+        required=True,
+        help="Remote image URL to classify.",
+    )
+    parser.add_argument(
+        "--model",
+        action="append",
+        required=True,
+        help="Path to an exported .pkl model. Repeat for multiple models.",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=30,
+        help="HTTP timeout in seconds for the image download.",
+    )
+    return parser.parse_args()
 
-# Predict using ResNet32
-pred32, pred_idx32, probs32 = learn_resnet32.predict(image)
-print('ResNet32 - Predicted class:', pred32)
-print('ResNet32 - Probability: {:.2f}%'.format(probs32[pred_idx32].item() * 100))
 
-# Predict using ResNet50
-pred50, pred_idx50, probs50 = learn_resnet50.predict(image)
-print('ResNet50 - Predicted class:', pred50)
-print('ResNet50 - Probability: {:.2f}%'.format(probs50[pred_idx50].item() * 100))
+def load_image(image_url: str, timeout: int) -> PILImage:
+    response = requests.get(image_url, timeout=timeout)
+    response.raise_for_status()
+    return PILImage.create(BytesIO(response.content))
 
-# Predict using ResNet101
-pred101, pred_idx101, probs101 = learn_resnet101.predict(image)
-print('ResNet101 - Predicted class:', pred101)
-print('ResNet101 - Probability: {:.2f}%'.format(probs101[pred_idx101].item() * 100))
+
+def main() -> None:
+    args = parse_args()
+    image = load_image(args.image_url, args.timeout)
+
+    for model_path_str in args.model:
+        model_path = Path(model_path_str)
+        learner = load_learner(model_path)
+        prediction, prediction_idx, probabilities = learner.predict(image)
+        confidence = probabilities[prediction_idx].item() * 100
+
+        print(f"Model: {model_path}")
+        print(f"Predicted class: {prediction}")
+        print(f"Probability: {confidence:.2f}%")
+        print()
+
+
+if __name__ == "__main__":
+    main()
